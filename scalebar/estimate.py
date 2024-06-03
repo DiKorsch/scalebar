@@ -6,6 +6,7 @@ import os
 import scalebar
 
 from scalebar import utils
+from scalebar.core.size import Size
 
 with utils.try_import("cvargparse"):
     from cvargparse import Arg
@@ -13,9 +14,8 @@ with utils.try_import("cvargparse"):
 
 
 def main(args):
-
     res = scalebar.Result.new(args.image_path,
-                              roi_fraction=args.fraction,
+                              scalebar_size=Size.get(args.size),
                               size_per_square=args.unit)
 
     px_per_mm = res.scale
@@ -35,8 +35,8 @@ parser = BaseParser([
     Arg.float("--unit", "-u", default=1.0,
               help="Size of a single square in the scale bar (in mm). Default: 1"),
 
-    Arg.float("--fraction", default=0.1,
-              help="Fraction of the image's border that will be used for the scale estimation. Default: 0.1"),
+    Arg("--size", default="MEDIUM", choices=["SMALL", "MEDIUM", "LARGE"],
+            help="Rough apriori estimate of the scale bar size. Default: MEDIUM"),
 
     Arg("--output", "-o")
 ])

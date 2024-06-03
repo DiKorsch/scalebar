@@ -52,9 +52,11 @@ python setup.py install
 import cv2
 import scalebar
 
-im = cv2.imread(path_to_your_image)
-px_per_mm = scalebar.get_scale(im, pos=scalebar.Position.top_left)
-# process the scale as you want
+res = scalebar.Result.new(args.image_path)
+size_per_square = res.size_per_square # mm in each square (default: 1.0). Can be set in Result.new(image_path, size_per_square=size)
+px_per_square = res.px_per_square #
+px_per_mm = res.scale # computed as px_per_square / size_per_square
+# process the numbers as you want
 ```
 
 ### From the console
@@ -75,6 +77,9 @@ python -m scalebar.estimate path/to/image.jpg -o output.txt
 # requires cvargparse, matplotlib, pyqt5
 python -m scalebar.visualize path/to/image.jpg
 # visualizes the estimation process
+
+python -m scalebar.visualize path/to/image.jpg -o vis.png
+# stores the visualization in a file
 ```
 
 ## Licence

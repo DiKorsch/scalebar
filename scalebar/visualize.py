@@ -7,6 +7,7 @@ import logging
 import scalebar
 
 from scalebar import utils
+from scalebar.core.size import Size
 
 with utils.try_import("cvargparse"):
     from cvargparse import Arg
@@ -45,13 +46,19 @@ def imshow(ims):
 def main(args) -> None:
     logging.info(f"Processing {args.image_path}")
     res = scalebar.Result.new(args.image_path,
-                              roi_fraction=args.fraction,
-                              size_per_square=args.unit)
+                              scalebar_size=Size.get(args.size),
+                              max_corners=100,
+                              size_per_square=args.unit,
+                              )
 
     images = res.images
-    ROI = utils.hide_non_roi(images.binary, res.roi_fraction, 127)
+    ROI = utils.hide_non_roi(images.binary, res.scalebar_size.value / 2, 127)
     scalebar_crop = res.position.crop(images.equalized)
+    match_crop = res.position.crop(res.match)
     px_per_mm = res.scale
+
+    logging.info(f"Computed sizes: {res.images.structure_sizes}")
+    logging.info(f"Used checkboard template size: {res.template.shape}")
 
     logging.info(f"Estimated Pixel per square: {res.px_per_square:.2f}")
     logging.info(f"Used size per square: {res.size_per_square:.2f}")
@@ -67,15 +74,16 @@ def main(args) -> None:
         ("ROI to be masked", ROI, plt.cm.gray),
         ("Masked", images.masked, plt.cm.gray),
 
-        ("Template Matches", (
-            images.binary,
-            res.match), (plt.cm.gray, plt.cm.viridis)),
+        # ("Template", , plt.cm.gray),
+        ("Template Matches", (images.binary, res.match), (plt.cm.gray, plt.cm.viridis)),
+
+        ("Cropped template matches", (scalebar_crop, match_crop), (plt.cm.gray, plt.cm.viridis)),
         (f"Scalebar | {res.scale} px/mm", scalebar_crop, plt.cm.gray),
     ])
 
-    ax = axs[np.unravel_index(7, axs.shape)]
+    ax = axs[np.unravel_index(8, axs.shape)]
     ys, xs = res.distances.corners.transpose(1, 0)
-    ax.scatter(xs, ys, marker=".", c="red")
+    ax.scatter(xs, ys, marker=".", c="red", alpha=0.3)
 
     W, H = res.image_size
     if px_per_mm is None:
@@ -99,9 +107,10 @@ def main(args) -> None:
 
 parser = BaseParser([
     Arg("image_path"),
-    Arg("--unit", "-u", type=float, default=1.0,
+    Arg.float("--unit", "-u", default=1.0,
         help="Size of a single square in the scale bar (in mm). Default: 1"),
-    Arg.float("--fraction", default=0.1),
+    Arg("--size", default="MEDIUM", choices=["SMALL", "MEDIUM", "LARGE"],
+              help="Rough apriori estimate of the scale bar size. Default: MEDIUM"),
     Arg("--output", "-o"),
 ])
 main(parser.parse_args())

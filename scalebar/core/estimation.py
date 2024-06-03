@@ -10,25 +10,33 @@ from dataclasses import dataclass
 from scalebar import utils
 from scalebar.core.bounding_box import BoundingBox
 from scalebar.core.image_wrapper import Images
+from scalebar.core.size import Size
+
 
 @dataclass
 class Result:
     image_path: str
+    scalebar_size: Size = Size.MEDIUM # rough estimate of the scale bar size
     image_size: T.Tuple[int, int] = (0, 0)
+
 
     images: T.Optional[Images] = None
     position: T.Optional[BoundingBox] = None
     scalebar: T.Optional[np.ndarray] = None
     px_per_square: T.Optional[float] = None # [px/square]
 
-    roi_fraction: float = 0.2 # fraction of the image's border that will be used for the scale estimation
+    match: T.Optional[np.ndarray] = None
+    template: T.Optional[np.ndarray] = None
+
+    # roi_fraction: float = 0.2 # fraction of the image's border that will be used for the scale estimation
     size_per_square: float = 1.0 # [mm/square] how many mm is a single square
 
     def __post_init__(self):
         with Image.open(self.image_path) as img:
             self.image_size = img.size
         im = utils.read_image(self.image_path)
-        self.images = Images(im, roi_fraction=self.roi_fraction)
+        self.images = Images(im, #roi_fraction=self.roi_fraction,
+                             size=self.scalebar_size)
 
     @classmethod
     def new(cls, file_name: str, *, max_corners: int = 50, **kwargs) -> 'Result':
@@ -58,9 +66,9 @@ class Result:
                                           minDistance=min_distance,
                                           mask=mask)
 
-        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-        shape = (2*min_distance+1, 2*min_distance+1)
-        corners = cv2.cornerSubPix(self.scalebar, corners, shape, (-1,-1), criteria)
+        # criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+        # shape = (2*min_distance+1, 2*min_distance+1)
+        # corners = cv2.cornerSubPix(self.scalebar, corners, shape, (-1,-1), criteria)
         # switch x and y coordinates for convenience (needed only for OpenCV)
         corners = corners[:, 0, ::-1].astype(int)
 
