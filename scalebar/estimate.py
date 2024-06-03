@@ -36,7 +36,7 @@ parser = BaseParser([
               help="Size of a single square in the scale bar (in mm). Default: 1"),
 
     Arg("--size", default="MEDIUM", choices=["SMALL", "MEDIUM", "LARGE"],
-            help="Rough apriori estimate of the scale bar size. Default: MEDIUM"),
+              help="Rough apriori estimate of the scale bar size - SMALL: 10%, MEDIUM: 30%, and LARGE: 50%. Default: MEDIUM"),
 
     Arg("--output", "-o")
 ])
