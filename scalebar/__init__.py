@@ -1,7 +1,6 @@
-from scalebar.core.estimation import get_scale
-from scalebar.core.position import Position
+from scalebar.core.estimation import Result
 
 __all__ = [
-    "get_scale",
-    "Position",
+    "Result",
+    # "Position",
 ]

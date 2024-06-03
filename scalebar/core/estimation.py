@@ -2,160 +2,142 @@ import cv2
 import numpy as np
 import typing as T
 
+from matplotlib import pyplot as plt
 from scipy.spatial.distance import pdist
-from skimage import feature
+from PIL import Image
+from dataclasses import dataclass
 
-from scalebar.core.position import Position
-from scalebar.utils import corner_ops
+from scalebar import utils
+from scalebar.core.bounding_box import BoundingBox
+from scalebar.core.image_wrapper import Images
 
+@dataclass
+class Result:
+    image_path: str
+    image_size: T.Tuple[int, int] = (0, 0)
 
-def get_scale(img: np.ndarray,
-              pos: Position = Position.top_right,
-              crop_size: float = 0.2,
-              crop_square: bool = False,
-              square_unit: float = 1.0,
-              min_dist: int = 5,
-              max_corners: int = np.inf,
-              cv2_corners: bool = True,
-              filter_corners: bool = False,
-              rectify_corners: bool = False,
-              binarize: bool = False,
-              return_intermediate: bool = False) -> T.Optional[float]:
-    """
-        Estimates the scale from the image in pixel per mm
+    images: T.Optional[Images] = None
+    position: T.Optional[BoundingBox] = None
+    scalebar: T.Optional[np.ndarray] = None
+    px_per_square: T.Optional[float] = None # [px/square]
 
-        Arguments:
-            img: input image
-            pos: position of the scale bar in the image
-            square_unit: length of a single square in the scale bar in mm
-            min_dist: minimum distance in pixel between two corners
-            max_corners: maximum amount of corners that will be estimated
-            cv2_corners: flag to use the cv2 implementation (if True)
-                or the scikit-image implementation (if False, default)
+    roi_fraction: float = 0.2 # fraction of the image's border that will be used for the scale estimation
+    size_per_square: float = 1.0 # [mm/square] how many mm is a single square
 
-        Returns:
-            scale: scaling factor in pixel per mm
-            intermediate: (optional) returns intermediate estimations
-                as dictionary with following keys:
-                    * detected_corners
-                    * filter_mask
-                    * rectification_angle
-                    * final_corners
-    """
-    if isinstance(crop_size, float):
-        crop_x = crop_y = crop_size
-    elif isinstance(crop_size, (tuple, list)):
-        crop_x, crop_y = crop_size
-    else:
-        raise ValueError(f"Unsupported crop size type: {crop_size=} (of type {type(crop_size).__name__})!")
-    crop = pos.crop(img, x=crop_x, y=crop_y, square=crop_square)
+    def __post_init__(self):
+        with Image.open(self.image_path) as img:
+            self.image_size = img.size
+        im = utils.read_image(self.image_path)
+        self.images = Images(im, roi_fraction=self.roi_fraction)
 
-    intermediate = dict(
-        init_crop=crop,
-        detected_corners=None,
-        filter_mask=None,
-        rectification_angle=None,
-        final_corners=None,
-    )
+    @classmethod
+    def new(cls, file_name: str, *, max_corners: int = 50) -> 'Result':
+        res = cls(file_name)
+        res.locate()
+        res.estimate(max_corners=max_corners)
+        return res
 
-    crop = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+    def locate(self) -> BoundingBox:
+        """ this function will locate the scale bar in the image, store the bounding box, and finally return it """
+        temp_size = self.images.structure_sizes.template_size
+        self.match, self.template = utils.match_scalebar(self.images.masked, template_size=temp_size)
+        self.position = utils.detect_scalebar(self.match, enlarge=temp_size)
+        return self.position
 
-    if binarize:
-        blur = cv2.GaussianBlur(crop, (5,5),0)
-        thresh, crop = cv2.threshold(blur,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+    def estimate(self, max_corners: int = 50) -> float:
+        """ this function will estimate the scale of the image and return it """
+        assert self.position is not None, "Position is required"
+        self.scalebar = self.position.crop(self.images.equalized)
+        mask = self.position.crop(self.match)
+        min_distance = self.images.structure_sizes.size
 
-    intermediate["crop"] = crop
+        bin_crop = utils.threshold(self.scalebar, mode=cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        corners = cv2.goodFeaturesToTrack(bin_crop,
+                                          maxCorners=0 if np.isinf(max_corners) else max_corners,
+                                          qualityLevel=0.1,
+                                          minDistance=min_distance,
+                                          mask=mask)
 
-    if cv2_corners:
-        # OpenCV's corner/feature detector
-        corners = cv2.goodFeaturesToTrack(crop, 0 if np.isinf(max_corners) else max_corners, 0.5, min_dist)
-        # termination criteria
         criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-        corners = cv2.cornerSubPix(crop, corners, (11,11), (-1,-1), criteria)
+        shape = (2*min_distance+1, 2*min_distance+1)
+        corners = cv2.cornerSubPix(self.scalebar, corners, shape, (-1,-1), criteria)
         # switch x and y coordinates for convenience (needed only for OpenCV)
         corners = corners[:, 0, ::-1].astype(int)
-    else:
-        # This is from Erik's code
-        resp = feature.corner_shi_tomasi(crop)
-        corners = feature.corner_peaks(resp,
-                                       min_distance=min_dist,
-                                       num_peaks=max_corners)
-    if len(corners) == 0:
-        if return_intermediate:
-            return None, intermediate
-        else:
-            return None
 
-    intermediate["detected_corners"] = corners
+        self.distances = Distances(corners)
+        self.px_per_square = self.distances.optimal_distance()
 
-    if filter_corners:
-        mask = corner_ops.filter(corners, crop)
-    else:
-        mask = np.ones(len(corners), dtype=bool)    
+        return self.scale
 
-    intermediate["filter_mask"] = mask
-    corners = corners[mask]
-
-    if rectify_corners:
-        corners, angle = corner_ops.rectify(corners)
-    else:
-        angle = 0.0
-
-    intermediate["rectification_angle"] = angle
-    intermediate["final_corners"] = corners
-
-    distances = pdist(corners, metric="cityblock")
-    if len(distances) != 0:
-        # unit_distance is in "pixel per square-block"
-        unit_distance = optimal_distance(distances)
-
-        scale = unit_distance / square_unit
-    
-    else:
-        scale = None
-
-    if return_intermediate:
-        return scale, intermediate
-    else:
-        return scale
+    @property
+    def scale(self) -> float:
+        return self.px_per_square / self.size_per_square
 
 
-def optimal_distance(distances: np.ndarray, step: float = 0.25) -> float:
-    """
-        Estimates the best distance by solving an
-        optimization problem
-    """
+class Distances:
+    def __init__(self, corners: np.ndarray, metric: str = "cityblock"):
+        self.corners = corners
+        self.distances = pdist(corners, metric=metric)
 
-    smallest_err = np.inf
-    best_distance = None
-    max_d = np.percentile(distances, 20)
-    min_d = max(1.0, np.percentile(distances, 1))
+    def reset(self):
 
-    for d in np.arange(min_d, max_d):
-        grid = np.arange(0, np.max(distances) + d, d)
-        if len(grid) <= 2:
-            continue
+        self.errors = [[], []]
+        self.n_bins = []
 
-        # compute quantization error
-        bins = (grid[:-1] + grid[1:]) / 2.0
-        prototypes = grid[1:-1]
-        bin_idxs = np.digitize(distances, bins)
-        bin_idxs -= 1
-        bin_idxs[bin_idxs == -1] = 0
-        bin_idxs[bin_idxs == len(prototypes)] = len(prototypes) - 1
+        self.unique_dists = sorted(np.unique(np.maximum(self.distances, 10)))
+        self.unique_dists = self.unique_dists[:len(self.unique_dists)//5]
 
-        # quantization error with BIC model selection
-        # adhoc version
-        n = len(distances)
-        err = np.linalg.norm(distances - prototypes[bin_idxs]) + \
-            len(prototypes) * np.log(n)
-        # theoretically derived criterion
-        # err = n * np.log(2 * np.pi) + \
-        #     np.linalg.norm(distances - prototypes[bin_idxs])**2 + \
-        #     len(prototypes) * np.log(n)
+    def optimal_distance(self, use_bic: bool = False) -> float:
+        self.reset()
+        smallest_err = np.inf
+        best_distance = None
 
-        if err < smallest_err:
-            smallest_err = err
-            best_distance = d
+        for d in self.unique_dists:
+            norm_dist = self.distances / d
+            grid = np.arange(0, np.max(self.distances) + d, d) / d
 
-    return best_distance
+            if len(grid) <= 2:
+                print(f"FOO: {d}")
+                continue
+
+            # compute quantization error
+            bins = (grid[:-1] + grid[1:]) / 2.0
+
+            prototypes = grid[1:-1]
+            self.n_bins.append(len(prototypes))
+            bin_idxs = np.digitize(norm_dist, bins)
+
+            bin_idxs -= 1
+            bin_idxs[bin_idxs == -1] = 0
+            bin_idxs[bin_idxs == len(prototypes)] = len(prototypes) - 1
+
+            # theoretically derived criterion
+            # err = n * np.log(2 * np.pi) + \
+            #     np.linalg.norm(distances - prototypes[bin_idxs])**2 + \
+            #     len(prototypes) * np.log(n)
+            # quantization error with BIC model selection
+            # adhoc version
+            n = len(norm_dist)
+            err = np.linalg.norm((norm_dist - prototypes[bin_idxs]))
+            self.errors[0].append(err)
+
+            if use_bic:
+                err = err + len(prototypes) * np.log(n)
+            self.errors[1].append(err)
+
+
+            if err < smallest_err:
+                smallest_err, best_distance = err, d
+
+        return best_distance
+
+    def plot_errors(self, **kwargs)-> T.Tuple[plt.Figure, plt.Axes]:
+        fig, ax = plt.subplots(**kwargs)
+
+        ax.plot(self.unique_dists, self.errors[0], label="err0")
+        ax.plot(self.unique_dists, self.errors[1], label="err1")
+        ax = ax.twinx()
+        ax.plot(self.unique_dists, np.log(self.n_bins), linestyle="dashed",
+                label="# bins")
+
+        return fig, ax
