@@ -14,13 +14,11 @@ with utils.try_import("cvargparse"):
 
 def main(args):
 
-    im = utils.read_image(args.image_path)
+    res = scalebar.Result.new(args.image_path,
+                              roi_fraction=args.fraction,
+                              size_per_square=args.unit)
 
-    positions = {pos.name.lower(): pos for pos in scalebar.Position}
-    pos = positions[args.position]
-    px_per_mm = scalebar.get_scale(im,
-                                   pos=pos,
-                                   square_unit=args.unit)
+    px_per_mm = res.scale
 
     if args.output:
         assert not os.path.exists(args.output), \
@@ -34,11 +32,11 @@ def main(args):
 parser = BaseParser([
     Arg("image_path"),
 
-    Arg("--position", "-pos", default="top_right",
-        choices=[pos.name.lower() for pos in scalebar.Position]),
+    Arg.float("--unit", "-u", default=1.0,
+              help="Size of a single square in the scale bar (in mm). Default: 1"),
 
-    Arg("--unit", "-u", type=float, default=1.0,
-        help="Size of a single square in the scale bar (in mm). Default: 1"),
+    Arg.float("--fraction", default=0.1,
+              help="Fraction of the image's border that will be used for the scale estimation. Default: 0.1"),
 
     Arg("--output", "-o")
 ])

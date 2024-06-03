@@ -31,8 +31,8 @@ class Result:
         self.images = Images(im, roi_fraction=self.roi_fraction)
 
     @classmethod
-    def new(cls, file_name: str, *, max_corners: int = 50) -> 'Result':
-        res = cls(file_name)
+    def new(cls, file_name: str, *, max_corners: int = 50, **kwargs) -> 'Result':
+        res = cls(file_name, **kwargs)
         res.locate()
         res.estimate(max_corners=max_corners)
         return res
