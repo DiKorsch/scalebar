@@ -2,7 +2,6 @@
 if __name__ != '__main__':
     raise Exception("Do not import me!")
 
-import cv2
 import numpy as np
 import logging
 import scalebar
