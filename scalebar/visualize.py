@@ -78,7 +78,7 @@ def main(args) -> None:
         ("Template Matches", (images.binary, res.match), (plt.cm.gray, plt.cm.viridis)),
 
         ("Cropped template matches", (scalebar_crop, match_crop), (plt.cm.gray, plt.cm.viridis)),
-        (f"Scalebar | {res.scale} px/mm", scalebar_crop, plt.cm.gray),
+        (f"Scalebar | {px_per_mm} px/mm", scalebar_crop, plt.cm.gray),
     ])
 
     ax = axs[np.unravel_index(8, axs.shape)]

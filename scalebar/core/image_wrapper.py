@@ -4,6 +4,7 @@ import typing as T
 
 from dataclasses import dataclass
 
+from scalebar import Position
 from scalebar import utils
 from scalebar.core.size import Size
 
@@ -68,6 +69,7 @@ class Images:
     # structure_fraction: float = 0.002
     structure_sizes: StructureSizes = None
     size: Size = Size.MEDIUM
+    location: T.Optional[Position] = None
 
     def __post_init__(self):
         assert self.original is not None, "Original image is required"
@@ -82,4 +84,4 @@ class Images:
         kernel = self.structure_sizes.kernel
         self.binary = binary = cv2.dilate(cv2.erode(binary, kernel=kernel, iterations=2), kernel=kernel, iterations=2)
 
-        self.masked = utils.hide_non_roi(binary, self.size.value / 2, 255)
+        self.masked = utils.hide_non_roi(binary, self.size.value / 2, 255, location=self.location)

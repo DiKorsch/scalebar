@@ -11,17 +11,19 @@ from scalebar import utils
 from scalebar.core.bounding_box import BoundingBox
 from scalebar.core.image_wrapper import Images
 from scalebar.core.size import Size
+from scalebar.core.position import Position
 
 
 @dataclass
 class Result:
     image_path: str
     scalebar_size: Size = Size.MEDIUM # rough estimate of the scale bar size
+    scalebar_location: T.Optional[Position] = None # apriori knowledge of the scale bar location
     image_size: T.Tuple[int, int] = (0, 0)
 
 
     images: T.Optional[Images] = None
-    position: T.Optional[BoundingBox] = None
+    position: T.Optional[BoundingBox] = None # estimated position of the scale bar
     scalebar: T.Optional[np.ndarray] = None
     px_per_square: T.Optional[float] = None # [px/square]
 
@@ -36,7 +38,8 @@ class Result:
             self.image_size = img.size
         im = utils.read_image(self.image_path)
         self.images = Images(im, #roi_fraction=self.roi_fraction,
-                             size=self.scalebar_size)
+                             size=self.scalebar_size,
+                             location=self.scalebar_location)
 
     @classmethod
     def new(cls, file_name: str, *, max_corners: int = 50, **kwargs) -> 'Result':

@@ -31,7 +31,8 @@ def equalize(gray: np.ndarray, *,
     clahe = cv2.createCLAHE(clipLimit=clipLimit, tileGridSize=tileGridSize)
     return clahe.apply(gray)
 
-def hide_non_roi(im, fraction: float, value, min_size: int = 200):
+def hide_non_roi(im, fraction: float, value,
+                 location: "Position" = None, min_size: int = 200):
     """ mask the non-ROI region of the image """
     res = im.copy()
     H, W, *_ = im.shape
@@ -40,6 +41,10 @@ def hide_non_roi(im, fraction: float, value, min_size: int = 200):
 
     y0, x0 = max(int(H*fraction), min_size), max(int(W*fraction), min_size)
     res[y0:H-y0, x0:W-x0] = value
+    if location is not None:
+        mask = np.zeros_like(res, dtype=bool)
+        location.crop(mask, fraction=2*fraction, square=False)[:] = True
+        res[~mask] = value
     return res
 
 def match_scalebar(bin_im, template_size: int):
