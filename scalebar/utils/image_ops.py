@@ -120,3 +120,50 @@ def detect_scalebar(match, enlarge: int = 10) -> BoundingBox:
     x0, y0 = np.maximum(coords.min(axis=0) - enlarge, 0)
     x1, y1 = np.minimum(coords.max(axis=0) + 2*enlarge, (W, H))
     return BoundingBox(x0, y0, x1-x0, y1-y0)
+
+
+def detect_scalebar_multi(images: "Images",
+                          template_path: T.Optional[str] = None, *,
+                          min_scale: float = 0.025,
+                          max_scale: float = 1.0,
+                          step: float = 0.025,
+                          enlarge: int = 10
+                          ) -> BoundingBox:
+
+    """ Detect the scale bar in the image using multiple scales """
+    gray = images.equalized
+    left_edge = int(images.roi_fraction * gray.shape[1])
+    search_area = images.equalized[:, :left_edge]
+    H, W, *_ = search_area.shape
+
+    best_score = -1
+    x0, y0 = 0, 0
+    x1, y1 = 0, 0
+    used_template = None
+    template_orig = cv2.imread(template_path, cv2.IMREAD_GRAYSCALE)
+    assert template_orig is not None, f"Could not read the template image: {template_path}"
+
+    for scale in np.arange(min_scale, max_scale + step, step):
+        template = cv2.resize(template_orig, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        th, tw = template.shape[:2]
+
+        if th > H or tw > W:
+            continue
+
+        result = cv2.matchTemplate(search_area, template, cv2.TM_CCOEFF_NORMED)
+        _, score, _, max_loc = cv2.minMaxLoc(result)
+
+        if score > best_score:
+            x0, y0 = max_loc
+            x1, y1 = x0 + tw, y0 + th
+            used_template = template, result
+            best_score = score
+
+    if used_template is None:
+        raise ValueError("Could not find the scale bar in the image")
+
+    if enlarge > 0:
+        x0, y0 = max(x0 - enlarge, 0), max(y0 - enlarge, 0)
+        x1, y1 = min(x1 + enlarge, W), min(y1 + enlarge, H)
+
+    return BoundingBox(x0, y0, x1-x0, y1-y0)

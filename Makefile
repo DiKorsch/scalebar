@@ -1,5 +1,5 @@
 install:
-	pip install . --no-deps --upgrade
+	pip install -e . --no-deps --upgrade
 
 build_sdist:
 	@python setup.py build sdist

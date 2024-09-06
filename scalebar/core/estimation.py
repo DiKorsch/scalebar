@@ -10,14 +10,12 @@ from dataclasses import dataclass
 from scalebar import utils
 from scalebar.core.bounding_box import BoundingBox
 from scalebar.core.image_wrapper import Images
-from scalebar.core.size import Size
 from scalebar.core.position import Position
 
 
 @dataclass
 class Result:
     image_path: str
-    scalebar_size: Size = Size.MEDIUM # rough estimate of the scale bar size
     scalebar_location: T.Optional[Position] = None # apriori knowledge of the scale bar location
     image_size: T.Tuple[int, int] = (0, 0)
 
@@ -29,16 +27,16 @@ class Result:
 
     match: T.Optional[np.ndarray] = None
     template: T.Optional[np.ndarray] = None
+    template_path: T.Optional[str] = None
 
-    # roi_fraction: float = 0.2 # fraction of the image's border that will be used for the scale estimation
+    roi_fraction: float = 0.15 # fraction of the image's border that will be used for the scale estimation
     size_per_square: float = 1.0 # [mm/square] how many mm is a single square
 
     def __post_init__(self):
         with Image.open(self.image_path) as img:
             self.image_size = img.size
         im = utils.read_image(self.image_path)
-        self.images = Images(im, #roi_fraction=self.roi_fraction,
-                             size=self.scalebar_size,
+        self.images = Images(im, roi_fraction=self.roi_fraction,
                              location=self.scalebar_location)
 
     @classmethod
@@ -48,18 +46,25 @@ class Result:
         res.estimate(max_corners=max_corners)
         return res
 
-    def locate(self) -> BoundingBox:
+    def locate(self, *, multi_scale: bool = True) -> BoundingBox:
         """ this function will locate the scale bar in the image, store the bounding box, and finally return it """
-        temp_size = self.images.structure_sizes.template_size
-        self.match, self.template = utils.match_scalebar(self.images.masked, template_size=temp_size)
-        self.position = utils.detect_scalebar(self.match, enlarge=temp_size)
+        if multi_scale:
+            self.position = utils.detect_scalebar_multi(
+                self.images, self.template_path)
+        else:
+            temp_size = self.images.structure_sizes.template_size
+            self.match, self.template = utils.match_scalebar(self.images.masked, template_size=temp_size)
+            self.position = utils.detect_scalebar(self.match, enlarge=temp_size)
         return self.position
 
     def estimate(self, max_corners: int = 50) -> float:
         """ this function will estimate the scale of the image and return it """
         assert self.position is not None, "Position is required"
         self.scalebar = self.position.crop(self.images.equalized)
-        mask = self.position.crop(self.match)
+        mask = None
+        if self.match is not None:
+            mask = self.position.crop(self.match)
+
         min_distance = self.images.structure_sizes.size
 
         bin_crop = utils.threshold(self.scalebar, mode=cv2.THRESH_BINARY + cv2.THRESH_OTSU)

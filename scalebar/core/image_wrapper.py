@@ -4,9 +4,8 @@ import typing as T
 
 from dataclasses import dataclass
 
-from scalebar import Position
 from scalebar import utils
-from scalebar.core.size import Size
+from scalebar.core.position import Position
 
 @dataclass(init=False)
 class StructureSizes:
@@ -65,10 +64,9 @@ class Images:
     template: T.Optional[np.ndarray] = None
     matched: T.Optional[np.ndarray] = None
 
-    # roi_fraction: float = 0.2
-    # structure_fraction: float = 0.002
     structure_sizes: StructureSizes = None
-    size: Size = Size.MEDIUM
+    roi_fraction: float = 0.15
+    structure_fraction: float = 0.002
     location: T.Optional[Position] = None
 
     def __post_init__(self):
@@ -80,8 +78,8 @@ class Images:
         self.binary = binary = utils.threshold(equalized,
                                                threshold=64, mode=cv2.THRESH_BINARY)
 
-        self.structure_sizes = StructureSizes.new(binary, fraction=self.size.value / 150)
+        self.structure_sizes = StructureSizes.new(binary, fraction=self.structure_fraction)
         kernel = self.structure_sizes.kernel
         self.binary = binary = cv2.dilate(cv2.erode(binary, kernel=kernel, iterations=2), kernel=kernel, iterations=2)
 
-        self.masked = utils.hide_non_roi(binary, self.size.value / 2, 255, location=self.location)
+        self.masked = utils.hide_non_roi(binary, self.roi_fraction, 255, location=self.location)
