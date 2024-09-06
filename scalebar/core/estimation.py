@@ -4,6 +4,7 @@ import typing as T
 
 from matplotlib import pyplot as plt
 from scipy.spatial.distance import pdist
+from scipy.spatial.distance import squareform
 from PIL import Image
 from dataclasses import dataclass
 
@@ -48,12 +49,13 @@ class Result:
 
     def locate(self, *, multi_scale: bool = True) -> BoundingBox:
         """ this function will locate the scale bar in the image, store the bounding box, and finally return it """
+        temp_size = self.images.structure_sizes.template_size
+        self.match, self.template = utils.match_scalebar(self.images.masked, template_size=temp_size)
+
         if multi_scale:
             self.position = utils.detect_scalebar_multi(
                 self.images, self.template_path)
         else:
-            temp_size = self.images.structure_sizes.template_size
-            self.match, self.template = utils.match_scalebar(self.images.masked, template_size=temp_size)
             self.position = utils.detect_scalebar(self.match, enlarge=temp_size)
         return self.position
 
@@ -67,7 +69,8 @@ class Result:
 
         min_distance = self.images.structure_sizes.size
 
-        bin_crop = utils.threshold(self.scalebar, mode=cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        self.scalebar = bin_crop = utils.threshold(self.scalebar, mode=cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
         corners = cv2.goodFeaturesToTrack(bin_crop,
                                           maxCorners=0 if np.isinf(max_corners) else max_corners,
                                           qualityLevel=0.1,
@@ -89,11 +92,16 @@ class Result:
     def scale(self) -> float:
         return self.px_per_square / self.size_per_square
 
+    def best_corners(self, *, distance: T.Optional[float] = None) -> np.ndarray:
+        return self.distances.best_corners(distance or self.px_per_square)
+
 
 class Distances:
     def __init__(self, corners: np.ndarray, metric: str = "cityblock"):
         self.corners = corners
         self.distances = pdist(corners, metric=metric)
+
+        self.unique_dists = None
 
     def reset(self):
 
@@ -116,13 +124,14 @@ class Distances:
                 print(f"FOO: {d}")
                 continue
 
-            # compute quantization error
-            bins = (grid[:-1] + grid[1:]) / 2.0
 
             prototypes = grid[1:-1]
             self.n_bins.append(len(prototypes))
-            bin_idxs = np.digitize(norm_dist, bins)
 
+            # compute quantization error
+            bins = (grid[:-1] + grid[1:]) / 2.0
+            # bin assignment for each distance
+            bin_idxs = np.digitize(norm_dist, bins)
             bin_idxs -= 1
             bin_idxs[bin_idxs == -1] = 0
             bin_idxs[bin_idxs == len(prototypes)] = len(prototypes) - 1
@@ -146,6 +155,38 @@ class Distances:
                 smallest_err, best_distance = err, d
 
         return best_distance
+
+    def best_corners(self, distance: float) -> np.ndarray:
+        """ select corners that match the given distance """
+        if self.unique_dists is None:
+            self.reset()
+
+        norm_dist = self.distances / distance
+        grid = np.arange(0, np.max(self.distances) + distance, distance) / distance
+        prototypes = grid[1:-1]
+
+        # compute quantization error
+        bins = (grid[:-1] + grid[1:]) / 2.0
+        # bin assignment for each distance
+        bin_idxs = np.digitize(norm_dist, bins)
+        bin_idxs -= 1
+        bin_idxs[bin_idxs == -1] = 0
+        bin_idxs[bin_idxs == len(prototypes)] = len(prototypes) - 1
+
+        errs = (norm_dist - prototypes[bin_idxs])**2
+
+        mask = np.zeros_like(self.distances, dtype=bool)
+        mask[errs == errs.min()] = True
+
+        mask_matrix0 = squareform(mask)
+        mask_matrix = np.logical_and(mask_matrix0, np.tri(len(self.corners)))
+
+        corner_pairs = np.where(mask_matrix)
+
+        corner_idxs = sorted(set(corner_pairs[0]) | set(corner_pairs[1]))
+
+        return corner_idxs, corner_pairs
+
 
     def plot_errors(self, **kwargs)-> T.Tuple[plt.Figure, plt.Axes]:
         fig, ax = plt.subplots(**kwargs)
