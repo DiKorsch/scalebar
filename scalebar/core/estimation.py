@@ -25,10 +25,12 @@ class Result:
     position: T.Optional[BoundingBox] = None # estimated position of the scale bar
     scalebar: T.Optional[np.ndarray] = None
     px_per_square: T.Optional[float] = None # [px/square]
+    distances: T.Optional['Distances'] = None
 
     match: T.Optional[np.ndarray] = None
     template: T.Optional[np.ndarray] = None
     template_path: T.Optional[str] = None
+    template_scale: T.Optional[float] = None # [px/square]
 
     roi_fraction: float = 0.15 # fraction of the image's border that will be used for the scale estimation
     size_per_square: float = 1.0 # [mm/square] how many mm is a single square
@@ -49,29 +51,38 @@ class Result:
 
     def locate(self, *, multi_scale: bool = True) -> BoundingBox:
         """ this function will locate the scale bar in the image, store the bounding box, and finally return it """
-        temp_size = self.images.structure_sizes.template_size
-        self.match, self.template = utils.match_scalebar(self.images.masked, template_size=temp_size)
 
         if multi_scale:
-            self.position = utils.detect_scalebar_multi(
-                self.images, self.template_path)
+            self.position, temp_size = utils.detect_scalebar_multi(
+                self.images, self.template_path, template_scale=self.template_scale)
+
+            if temp_size is not None:
+                """ if the template size is estimated, store it directly """
+                self.px_per_square = temp_size
+
         else:
+            temp_size = self.images.structure_sizes.template_size
+            self.match, self.template = utils.match_scalebar(self.images.masked, template_size=temp_size)
             self.position = utils.detect_scalebar(self.match, enlarge=temp_size)
+
+        self.scalebar = self.position.crop(self.images.equalized)
+        self.scalebar = utils.threshold(self.scalebar, mode=cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
         return self.position
 
     def estimate(self, max_corners: int = 50) -> float:
         """ this function will estimate the scale of the image and return it """
-        assert self.position is not None, "Position is required"
-        self.scalebar = self.position.crop(self.images.equalized)
+        assert self.scalebar is not None, "Located and cropped scalebar is required"
+        if self.px_per_square is not None:
+            """ if the scale is already estimated, return it """
+            return self.scale
+
         mask = None
         if self.match is not None:
             mask = self.position.crop(self.match)
-
         min_distance = self.images.structure_sizes.size
 
-        self.scalebar = bin_crop = utils.threshold(self.scalebar, mode=cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-        corners = cv2.goodFeaturesToTrack(bin_crop,
+        corners = cv2.goodFeaturesToTrack(self.scalebar,
                                           maxCorners=0 if np.isinf(max_corners) else max_corners,
                                           qualityLevel=0.1,
                                           minDistance=min_distance,

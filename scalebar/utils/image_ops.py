@@ -123,7 +123,8 @@ def detect_scalebar(match, enlarge: int = 10) -> BoundingBox:
 
 
 def detect_scalebar_multi(images: "Images",
-                          template_path: T.Optional[str] = None, *,
+                          template_path: str, *,
+                          template_scale: T.Optional[float] = None,
                           min_scale: float = 0.025,
                           max_scale: float = 1.0,
                           step: float = 0.025,
@@ -137,6 +138,7 @@ def detect_scalebar_multi(images: "Images",
     H, W, *_ = search_area.shape
 
     best_score = -1
+    est_scale = None
     x0, y0 = 0, 0
     x1, y1 = 0, 0
     used_template = None
@@ -158,6 +160,8 @@ def detect_scalebar_multi(images: "Images",
             x1, y1 = x0 + tw, y0 + th
             used_template = template, result
             best_score = score
+            if template_scale is not None:
+                est_scale = int(scale * template_scale)
 
     if used_template is None:
         raise ValueError("Could not find the scale bar in the image")
@@ -166,4 +170,4 @@ def detect_scalebar_multi(images: "Images",
         x0, y0 = max(x0 - enlarge, 0), max(y0 - enlarge, 0)
         x1, y1 = min(x1 + enlarge, W), min(y1 + enlarge, H)
 
-    return BoundingBox(x0, y0, x1-x0, y1-y0)
+    return BoundingBox(x0, y0, x1-x0, y1-y0), est_scale
