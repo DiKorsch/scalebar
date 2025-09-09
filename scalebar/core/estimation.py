@@ -13,13 +13,20 @@ from scalebar.core.bounding_box import BoundingBox
 from scalebar.core.image_wrapper import Images
 from scalebar.core.position import Position
 
+@dataclass
+class Template:
+    path: T.Optional[str] = None
+    scale: T.Optional[float] = None
+    match_score: T.Optional[float] = None
+    generated: T.Optional[np.ndarray] = None
 
 @dataclass
 class Result:
     image_path: str
+    template: Template = None
+
     scalebar_location: T.Optional[Position] = None # apriori knowledge of the scale bar location
     image_size: T.Tuple[int, int] = (0, 0)
-
 
     images: T.Optional[Images] = None
     position: T.Optional[BoundingBox] = None # estimated position of the scale bar
@@ -28,9 +35,6 @@ class Result:
     distances: T.Optional['Distances'] = None
 
     match: T.Optional[np.ndarray] = None
-    template: T.Optional[np.ndarray] = None
-    template_path: T.Optional[str] = None
-    template_scale: T.Optional[float] = None # [px/square]
 
     roi_fraction: float = 0.15 # fraction of the image's border that will be used for the scale estimation
     size_per_square: float = 1.0 # [mm/square] how many mm is a single square
@@ -41,6 +45,8 @@ class Result:
         im = utils.read_image(self.image_path)
         self.images = Images(im, roi_fraction=self.roi_fraction,
                              location=self.scalebar_location)
+        if self.template is None:
+            self.template = Template()
 
     @classmethod
     def new(cls, file_name: str, *, max_corners: int = 50, **kwargs) -> 'Result':
@@ -53,20 +59,27 @@ class Result:
         """ this function will locate the scale bar in the image, store the bounding box, and finally return it """
 
         if multi_scale:
-            self.position, temp_size = utils.detect_scalebar_multi(
-                self.images, self.template_path, template_scale=self.template_scale)
+            # here, we apply a multi-scale template matching to find the scale bar
+            # based on a given template image
+            self.position, temp_size, self.template.match_score = utils.detect_scalebar_multi(
+                self.images, self.template.path,
+                template_scale=self.template.scale,
+                )
 
             if temp_size is not None:
                 """ if the template size is estimated, store it directly """
                 self.px_per_square = temp_size
 
         else:
+            # here, we create a small checkerboard template on the fly
+            # and use it to find the scale bar in the image
             temp_size = self.images.structure_sizes.template_size
-            self.match, self.template = utils.match_scalebar(self.images.masked, template_size=temp_size)
+            self.match, self.template.generated, self.template.match_score = \
+                    utils.match_scalebar(self.images.masked, template_size=temp_size)
             self.position = utils.detect_scalebar(self.match, enlarge=temp_size)
 
-        self.scalebar = self.position.crop(self.images.equalized)
-        self.scalebar = utils.threshold(self.scalebar, mode=cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        scalebar = self.position.crop(self.images.equalized)
+        self.scalebar = utils.threshold(scalebar, mode=cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
         return self.position
 

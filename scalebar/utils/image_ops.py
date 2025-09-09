@@ -69,8 +69,10 @@ def match_scalebar(bin_im, template_size: int):
     template[template_size:, :template_size] = WHITE
 
     padding = (template_size, template_size-1)
-    match = np.abs(cv2.matchTemplate(bin_im, template, method=cv2.TM_CCOEFF_NORMED))
-    match = np.pad(match, (padding, padding))
+    match = cv2.matchTemplate(bin_im, template, method=cv2.TM_CCOEFF_NORMED)
+    _, score, _, _ = cv2.minMaxLoc(match)
+
+    match = np.pad(np.abs(match), (padding, padding))
     assert bin_im.shape == match.shape
 
     match -= match.min()
@@ -79,7 +81,7 @@ def match_scalebar(bin_im, template_size: int):
 
     _, match = cv2.threshold(match, GRAY, WHITE, cv2.THRESH_BINARY)
 
-    return match, template
+    return match, template, score
 
 
 def detect_scalebar(match, enlarge: int = 10) -> BoundingBox:
@@ -129,7 +131,7 @@ def detect_scalebar_multi(images: "Images",
                           max_scale: float = 1.0,
                           step: float = 0.025,
                           enlarge: int = 10
-                          ) -> BoundingBox:
+                          ) -> T.Tuple[BoundingBox, float, float]:
 
     """ Detect the scale bar in the image using multiple scales """
     gray = images.equalized
@@ -138,7 +140,7 @@ def detect_scalebar_multi(images: "Images",
     H, W, *_ = search_area.shape
 
     best_score = -1
-    est_scale = None
+    best_scale = None
     x0, y0 = 0, 0
     x1, y1 = 0, 0
     used_template = None
@@ -161,7 +163,7 @@ def detect_scalebar_multi(images: "Images",
             used_template = template, result
             best_score = score
             if template_scale is not None:
-                est_scale = int(scale * template_scale)
+                best_scale = int(scale * template_scale)
 
     if used_template is None:
         raise ValueError("Could not find the scale bar in the image")
@@ -170,4 +172,4 @@ def detect_scalebar_multi(images: "Images",
         x0, y0 = max(x0 - enlarge, 0), max(y0 - enlarge, 0)
         x1, y1 = min(x1 + enlarge, W), min(y1 + enlarge, H)
 
-    return BoundingBox(x0, y0, x1-x0, y1-y0), est_scale
+    return BoundingBox(x0, y0, x1-x0, y1-y0), best_scale, best_score
